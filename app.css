@@ -132,6 +132,15 @@ button { color: inherit; }
 .form-card input, .form-card textarea, .form-card select { width: 100%; margin-top: 7px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px; background: #faf8f2; color: var(--ink); outline: none; }
 .form-card input:focus, .form-card textarea:focus, .form-card select:focus { border-color: #8d9586; box-shadow: 0 0 0 3px rgba(215,255,95,.35); }
 .form-card textarea { resize: vertical; }
+.photo-import { margin: 14px 0 18px; padding: 15px; border: 1px dashed #a8ae9f; border-radius: 16px; background: #f3f8e4; }
+.photo-pick { display: flex !important; align-items: center; justify-content: center; gap: 8px; margin: 0 !important; padding: 13px; border-radius: 12px; background: var(--ink); color: white !important; cursor: pointer; font-size: 14px !important; }
+.photo-pick input { display: none; }
+.photo-import > small { display: block; margin-top: 9px; color: var(--muted); line-height: 1.5; }
+.ocr-preview { width: 100%; max-height: 180px; object-fit: contain; margin-top: 12px; border-radius: 10px; background: white; }
+.ocr-status { display: none; margin-top: 11px; color: var(--muted); font-size: 12px; }
+.ocr-status.active { display: block; }
+.ocr-progress { height: 6px; margin-top: 7px; overflow: hidden; border-radius: 20px; background: #d8ddca; }
+.ocr-progress i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--coral); transition: width .2s; }
 .primary-btn { width: 100%; margin-top: 5px; }
 .secondary-btn { border: 1px solid var(--line); background: var(--white); border-radius: 12px; padding: 11px 14px; font-weight: 750; cursor: pointer; }
 .danger { color: #c64e3c; }
