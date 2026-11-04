@@ -2,6 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "word-buddy-single-v1";
+  const OCR_ENDPOINT = String(window.WORD_BUDDY_OCR_ENDPOINT || "").trim();
   const TODAY = () => {
     const parts = new Intl.DateTimeFormat("en", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
     const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
@@ -37,7 +38,7 @@
   let ui = { tab: "learn", unit: Math.min(...data.words.map((w) => w.unit), 1), index: 0, revealed: false, freshUnit: true, filter: "all", openResource: null };
   let installPrompt = null;
   let toastTimer = null;
-  let ocrScriptPromise = null;
+  let activeAudio = null;
 
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function loadData() {
@@ -122,9 +123,9 @@
     data.attempts.filter((a) => a.result === "review").forEach((a) => reviewMap.set(a.wordId, (reviewMap.get(a.wordId) || 0) + 1));
     const weak = [...reviewMap.entries()].sort((a,b) => b[1]-a[1]).map(([id,count]) => ({ word: data.words.find((w) => w.id === id), count })).filter((x) => x.word).slice(0,8);
     const days = new Set(data.attempts.map((a) => a.day)).size;
-    return `<header><p class="eyebrow">LOCAL PROGRESS</p><h1 class="page-title">每一点进步，<br>都留在这台平板。</h1><p class="page-copy">这里不会上传任何学习数据。需要换设备时，可以在管理页导出备份。</p></header>
+    return `<header><p class="eyebrow">LOCAL PROGRESS</p><h1 class="page-title">每一点进步，<br>都留在这台平板。</h1><p class="page-copy">学习记录不会上传。只有使用拍照识词时，照片会临时发送到腾讯云 OCR。需要换设备时，可以在管理页导出备份。</p></header>
       <div class="stats"><article class="stat" style="--accent:var(--lime)"><strong>${today.length}</strong><span>今日回答</span><i></i></article><article class="stat" style="--accent:var(--coral)"><strong>${today.length ? Math.round(remembered/today.length*100) : 0}%</strong><span>今日记住率</span><i></i></article><article class="stat" style="--accent:var(--blue)"><strong>${days}</strong><span>累计学习天数</span><i></i></article><article class="stat" style="--accent:#e3a7e8"><strong>${data.words.length}</strong><span>词库总量</span><i></i></article></div>
-      <div class="grid-2"><section class="panel section-card"><span class="panel-label">REVIEW LIST</span><h2>需要再见面的词</h2>${weak.length ? weak.map(({word,count}) => `<div class="weak-row"><div><strong>${esc(word.english)}</strong><small>${esc(word.chinese)}</small></div><span>复习 ${count} 次</span></div>`).join("") : '<p class="empty">还没有薄弱词，继续保持。</p>'}</section><section class="panel section-card"><span class="panel-label">PRIVACY</span><h2>本机学习记录</h2><p class="page-copy">单词、资料和进度都保存在当前浏览器中。清除浏览器数据或卸载应用前，请先导出备份。</p><div class="storage-note">✓ 不需要账号<br>✓ 不上传学习记录<br>✓ 安装后可以离线使用</div></section></div>`;
+      <div class="grid-2"><section class="panel section-card"><span class="panel-label">REVIEW LIST</span><h2>需要再见面的词</h2>${weak.length ? weak.map(({word,count}) => `<div class="weak-row"><div><strong>${esc(word.english)}</strong><small>${esc(word.chinese)}</small></div><span>复习 ${count} 次</span></div>`).join("") : '<p class="empty">还没有薄弱词，继续保持。</p>'}</section><section class="panel section-card"><span class="panel-label">PRIVACY</span><h2>本机学习记录</h2><p class="page-copy">单词、资料和进度都保存在当前浏览器中。清除浏览器数据或卸载应用前，请先导出备份。</p><div class="storage-note">✓ 不需要账号<br>✓ 学习记录不上传<br>✓ 背词和资料可离线使用<br>✓ 发音优先使用国内联网音频<br>✓ 拍照识别时照片发送腾讯云</div></section></div>`;
   }
 
   function renderResources() {
@@ -142,7 +143,7 @@
   function renderManage() {
     const maxUnit = Math.max(1, ...data.words.map((w) => w.unit));
     return `<header><p class="eyebrow">MY DESK</p><h1 class="page-title">整理这间小小学习室。</h1><p class="page-copy">直接从书里复制词表，也可以收藏作文、资料和 B 站视频。</p></header><div class="manage-grid">
-      <form id="wordForm" class="form-card"><span class="panel-label">VOCABULARY</span><h2>添加一个单元的词</h2><label>单元编号<input name="unit" type="number" min="1" value="${maxUnit}" required></label><div class="photo-import"><label class="photo-pick">📷 拍照识别词表<input id="wordPhoto" type="file" accept="image/*" capture="environment"></label><small>照片只在这台设备中识别，不会上传。识别后请检查中文和拼写。</small><img id="ocrPreview" class="ocr-preview" hidden alt="待识别的词表照片"><div id="ocrStatus" class="ocr-status"><span>正在准备识别…</span><div class="ocr-progress"><i></i></div></div></div><label>词表（每行：英文, 中文, 音标, 例句）<textarea name="rows" rows="9" placeholder="apple, 苹果, /ˈæpl/, I eat an apple.\ncreative, 有创造力的" required></textarea></label><button class="primary-btn" type="submit">＋ 加入词书</button></form>
+      <form id="wordForm" class="form-card"><span class="panel-label">VOCABULARY</span><h2>添加一个单元的词</h2><label>单元编号<input name="unit" type="number" min="1" value="${maxUnit}" required></label><div class="photo-import"><label class="photo-pick">📷 拍照联网识别<input id="wordPhoto" type="file" accept="image/*" capture="environment"></label><small>拍照后会上传到腾讯云 OCR 进行文字识别。学习记录和词库仍只保存在这台设备中。</small><img id="ocrPreview" class="ocr-preview" hidden alt="待识别的词表照片"><div id="ocrStatus" class="ocr-status"><span>正在准备识别…</span><div class="ocr-progress"><i></i></div></div></div><label>词表（每行：英文, 中文, 音标, 例句）<textarea name="rows" rows="9" placeholder="apple, 苹果, /ˈæpl/, I eat an apple.\ncreative, 有创造力的" required></textarea></label><button class="primary-btn" type="submit">＋ 加入词书</button></form>
       <form id="resourceForm" class="form-card"><span class="panel-label">LIBRARY</span><h2>添加作文、资料或视频</h2><label>类型<select name="type"><option value="essay">作文范文</option><option value="note">学习资料</option><option value="video">B站视频</option></select></label><label>标题<input name="title" required placeholder="例如：中考英语高分作文"></label><label>一句说明<input name="description" placeholder="为什么值得看"></label><label>正文内容<textarea name="content" rows="4" placeholder="可以粘贴作文或学习资料"></textarea></label><label>视频链接<input name="url" inputmode="url" placeholder="https://www.bilibili.com/video/..."></label><button class="primary-btn" type="submit">＋ 添加到资料库</button></form>
       <section class="form-card"><span class="panel-label">BACKUP</span><h2>备份与换设备</h2><div class="backup-actions"><button class="secondary-btn" data-action="export">导出备份</button><label class="secondary-btn file-label">导入备份<input id="importFile" type="file" accept="application/json"></label><button class="secondary-btn danger" data-action="clear-progress">清空学习记录</button></div><div class="storage-note">建议每隔一段时间导出一次备份文件。如果更换平板，可以在新设备里导入。</div></section>
       <section class="form-card"><span class="panel-label">WORD BOOK</span><h2>词库管理</h2><p class="page-copy">当前有 ${units().length} 个单元，共 ${data.words.length} 个单词。</p><label>删除整个单元<select id="deleteUnit"><option value="">选择单元</option>${units().map((unit) => `<option value="${unit}">Unit ${unit}（${data.words.filter((w) => w.unit === unit).length}词）</option>`).join("")}</select></label><button class="secondary-btn danger" data-action="delete-unit">删除所选单元</button></section>
@@ -197,8 +198,33 @@
     saveData(); ui.index += 1; ui.revealed = false; render();
   }
   function speak(word) {
-    if (!("speechSynthesis" in window)) return toast("这台设备暂不支持发音");
-    speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(word); utterance.lang = "en-US"; utterance.rate = .82; speechSynthesis.speak(utterance);
+    if (activeAudio) { activeAudio.pause(); activeAudio = null; }
+    if (navigator.onLine) {
+      let switched = false;
+      const fallback = () => {
+        if (switched) return;
+        switched = true;
+        activeAudio = null;
+        speakWithDevice(word);
+      };
+      const audio = new Audio(`https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`);
+      activeAudio = audio;
+      audio.preload = "auto";
+      audio.addEventListener("error", fallback, { once: true });
+      audio.addEventListener("ended", () => { if (activeAudio === audio) activeAudio = null; }, { once: true });
+      audio.play().catch(fallback);
+      return;
+    }
+    speakWithDevice(word);
+  }
+  function speakWithDevice(word) {
+    if (!("speechSynthesis" in window)) return toast("联网后即可播放单词发音");
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = "en-US";
+    utterance.rate = .82;
+    utterance.onerror = () => toast("联网后即可播放单词发音");
+    speechSynthesis.speak(utterance);
   }
   function exportBackup() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a");
@@ -221,19 +247,6 @@
   function updateNetwork() {
     const node = document.getElementById("networkStatus"); if (!node) return;
     node.classList.toggle("offline", !navigator.onLine); node.querySelector("b").textContent = navigator.onLine ? "可离线使用" : "当前离线";
-  }
-
-  function loadOcrScript() {
-    if (window.Tesseract) return Promise.resolve();
-    if (ocrScriptPromise) return ocrScriptPromise;
-    ocrScriptPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "./tesseract.min.js";
-      script.onload = resolve;
-      script.onerror = () => reject(new Error("识别组件加载失败"));
-      document.head.appendChild(script);
-    });
-    return ocrScriptPromise;
   }
 
   function ocrRows(text) {
@@ -267,24 +280,23 @@
     const previewUrl = URL.createObjectURL(file);
     if (preview) { preview.src = previewUrl; preview.hidden = false; }
     if (status) status.classList.add("active");
-    if (statusText) statusText.textContent = "正在加载本地识别组件…";
-    if (bar) bar.style.width = "4%";
+    if (statusText) statusText.textContent = "正在压缩照片…";
+    if (bar) bar.style.width = "12%";
     try {
-      await loadOcrScript();
-      const base = new URL("./", location.href).href.replace(/\/$/, "");
-      const worker = await window.Tesseract.createWorker(["eng", "chi_sim"], 1, {
-        workerPath: `${base}/tesseract-worker.min.js`,
-        corePath: base,
-        langPath: base,
-        logger(message) {
-          const percent = Math.round((message.progress || 0) * 100);
-          if (bar && percent) bar.style.width = `${Math.max(6, percent)}%`;
-          if (statusText) statusText.textContent = message.status === "recognizing text" ? `正在识别文字 ${percent}%` : "正在准备中英文识别…";
-        }
+      if (!navigator.onLine) throw new Error("联网识别需要网络，请连接网络后重试");
+      if (!OCR_ENDPOINT || !/^https:\/\//i.test(OCR_ENDPOINT)) throw new Error("联网识别服务正在配置，请稍后再试");
+      const imageBase64 = await imageToBase64(file);
+      if (statusText) statusText.textContent = "照片已安全发送，腾讯云正在识别…";
+      if (bar) bar.style.width = "58%";
+      const response = await fetch(OCR_ENDPOINT, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: imageBase64 })
       });
-      const result = await worker.recognize(file);
-      await worker.terminate();
-      const rows = ocrRows(result.data.text || "");
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) throw new Error(result.message || "识别服务暂时不可用，请稍后重试");
+      const rows = ocrRows(Array.isArray(result.lines) ? result.lines.join("\n") : "");
       if (!rows) throw new Error("没有识别出成对的英文和中文，请换一张更清晰、摆正的照片");
       textarea.value = rows;
       if (bar) bar.style.width = "100%";
@@ -297,6 +309,31 @@
       URL.revokeObjectURL(previewUrl);
       event.target.value = "";
     }
+  }
+
+  function imageToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      const source = URL.createObjectURL(file);
+      image.onload = () => {
+        try {
+          const maxSide = 2000;
+          const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+          canvas.getContext("2d", { alpha: false }).drawImage(image, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.84);
+          URL.revokeObjectURL(source);
+          resolve(dataUrl.split(",")[1]);
+        } catch (error) {
+          URL.revokeObjectURL(source);
+          reject(error);
+        }
+      };
+      image.onerror = () => { URL.revokeObjectURL(source); reject(new Error("无法读取这张照片")); };
+      image.src = source;
+    });
   }
 
   window.addEventListener("beforeinstallprompt", (event) => { event.preventDefault(); installPrompt = event; render(); });
