@@ -1,5 +1,5 @@
-const CACHE = "word-buddy-pwa-v6";
-const ASSETS = ["./", "./index.html", "./app.css", "./ocr-config.js?v=6", "./app.js?v=6", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
+const CACHE = "word-buddy-pwa-v7";
+const ASSETS = ["./", "./index.html", "./app.css", "./ocr-config.js?v=7", "./ocr-parser.js?v=7", "./app.js?v=7", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));

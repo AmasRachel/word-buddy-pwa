@@ -143,7 +143,7 @@
   function renderManage() {
     const maxUnit = Math.max(1, ...data.words.map((w) => w.unit));
     return `<header><p class="eyebrow">MY DESK</p><h1 class="page-title">整理这间小小学习室。</h1><p class="page-copy">直接从书里复制词表，也可以收藏作文、资料和 B 站视频。</p></header><div class="manage-grid">
-      <form id="wordForm" class="form-card"><span class="panel-label">VOCABULARY</span><h2>添加一个单元的词</h2><label>单元编号<input name="unit" type="number" min="1" value="${maxUnit}" required></label><div class="photo-import"><label class="photo-pick">📷 拍照联网识别<input id="wordPhoto" type="file" accept="image/*" capture="environment"></label><small>拍照后会上传到腾讯云 OCR 进行文字识别。学习记录和词库仍只保存在这台设备中。</small><img id="ocrPreview" class="ocr-preview" hidden alt="待识别的词表照片"><div id="ocrStatus" class="ocr-status"><span>正在准备识别…</span><div class="ocr-progress"><i></i></div></div></div><label>词表（每行：英文, 中文, 音标, 例句）<textarea name="rows" rows="9" placeholder="apple, 苹果, /ˈæpl/, I eat an apple.\ncreative, 有创造力的" required></textarea></label><button class="primary-btn" type="submit">＋ 加入词书</button></form>
+      <form id="wordForm" class="form-card"><span class="panel-label">VOCABULARY</span><h2>添加一个单元的词</h2><label>单元编号<input name="unit" type="number" min="1" value="${maxUnit}" required></label><div class="photo-import"><label class="photo-pick">📷 拍照联网识别<input id="wordPhoto" type="file" accept="image/*" capture="environment"></label><small>请尽量只拍当前单元的一列词表，不要把左右两列一起拍。系统会自动过滤例句、搭配和助记；加入前仍请检查一次。</small><img id="ocrPreview" class="ocr-preview" hidden alt="待识别的词表照片"><div id="ocrStatus" class="ocr-status"><span>正在准备识别…</span><div class="ocr-progress"><i></i></div></div></div><label>词表（每行：英文, 中文, 音标, 例句）<textarea name="rows" rows="9" placeholder="apple, 苹果, /ˈæpl/, I eat an apple.\ncreative, 有创造力的" required></textarea></label><button class="primary-btn" type="submit">＋ 加入词书</button></form>
       <form id="resourceForm" class="form-card"><span class="panel-label">LIBRARY</span><h2>添加作文、资料或视频</h2><label>类型<select name="type"><option value="essay">作文范文</option><option value="note">学习资料</option><option value="video">B站视频</option></select></label><label>标题<input name="title" required placeholder="例如：中考英语高分作文"></label><label>一句说明<input name="description" placeholder="为什么值得看"></label><label>正文内容<textarea name="content" rows="4" placeholder="可以粘贴作文或学习资料"></textarea></label><label>视频链接<input name="url" inputmode="url" placeholder="https://www.bilibili.com/video/..."></label><button class="primary-btn" type="submit">＋ 添加到资料库</button></form>
       <section class="form-card"><span class="panel-label">BACKUP</span><h2>备份与换设备</h2><div class="backup-actions"><button class="secondary-btn" data-action="export">导出备份</button><label class="secondary-btn file-label">导入备份<input id="importFile" type="file" accept="application/json"></label><button class="secondary-btn danger" data-action="clear-progress">清空学习记录</button></div><div class="storage-note">建议每隔一段时间导出一次备份文件。如果更换平板，可以在新设备里导入。</div></section>
       <section class="form-card"><span class="panel-label">WORD BOOK</span><h2>词库管理</h2><p class="page-copy">当前有 ${units().length} 个单元，共 ${data.words.length} 个单词。</p><label>删除整个单元<select id="deleteUnit"><option value="">选择单元</option>${units().map((unit) => `<option value="${unit}">Unit ${unit}（${data.words.filter((w) => w.unit === unit).length}词）</option>`).join("")}</select></label><button class="secondary-btn danger" data-action="delete-unit">删除所选单元</button></section>
@@ -249,25 +249,6 @@
     node.classList.toggle("offline", !navigator.onLine); node.querySelector("b").textContent = navigator.onLine ? "可离线使用" : "当前离线";
   }
 
-  function ocrRows(text) {
-    const rows = [];
-    const englishOnly = [];
-    const chineseOnly = [];
-    const lines = text.split(/\n/).map((line) => line.replace(/[|•·]/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
-    for (const line of lines) {
-      const english = line.match(/[A-Za-z][A-Za-z'-]{1,}/)?.[0] || "";
-      const chineseAt = line.search(/[\u3400-\u9fff]/);
-      const chinese = chineseAt >= 0 ? line.slice(chineseAt).replace(/\s+/g, "").replace(/[0-9]+$/g, "") : "";
-      if (english && chinese) rows.push(`${english}, ${chinese}`);
-      else if (english) englishOnly.push(english);
-      else if (chinese) chineseOnly.push(chinese);
-    }
-    const paired = Math.min(englishOnly.length, chineseOnly.length);
-    for (let index = 0; index < paired; index += 1) rows.push(`${englishOnly[index]}, ${chineseOnly[index]}`);
-    for (let index = paired; index < englishOnly.length; index += 1) rows.push(`${englishOnly[index]}, 请补中文`);
-    return [...new Set(rows)].join("\n");
-  }
-
   async function recognizeWordPhoto(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -296,11 +277,11 @@
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.ok) throw new Error(result.message || "识别服务暂时不可用，请稍后重试");
-      const rows = ocrRows(Array.isArray(result.lines) ? result.lines.join("\n") : "");
-      if (!rows) throw new Error("没有识别出成对的英文和中文，请换一张更清晰、摆正的照片");
-      textarea.value = rows;
+      const parsed = window.WordBuddyOcr?.parse(Array.isArray(result.lines) ? result.lines.join("\n") : "") || { rows: "", count: 0, filtered: 0 };
+      if (!parsed.rows) throw new Error("没有找到可靠的词条。请只拍一列词表，并让文字保持清晰、摆正");
+      textarea.value = parsed.rows;
       if (bar) bar.style.width = "100%";
-      if (statusText) statusText.textContent = `识别完成，共找到 ${rows.split(/\n/).length} 个词，请检查后再加入词书。`;
+      if (statusText) statusText.textContent = `整理完成：保留 ${parsed.count} 个疑似词条，自动过滤 ${parsed.filtered} 行例句或杂项。请检查后再加入词书。`;
       toast("拍照识别完成，请检查词表");
     } catch (cause) {
       if (statusText) statusText.textContent = cause instanceof Error ? cause.message : "识别失败，请重新拍照";
