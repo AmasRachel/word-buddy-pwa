@@ -39,6 +39,8 @@
   let installPrompt = null;
   let toastTimer = null;
   let activeAudio = null;
+  let audioFallbackTimer = null;
+  let speechRequestId = 0;
 
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function loadData() {
@@ -80,6 +82,7 @@
         <div class="device-note"><strong>仅保存在这台平板</strong>无需登录，也不会同步到其他设备。</div>
         <button id="installButton" class="install-btn" ${installPrompt ? "" : "hidden"}>安装到桌面</button>
       </aside>
+      <audio id="wordAudio" preload="none" playsinline webkit-playsinline hidden></audio>
       <main class="main">
         <div class="topline"><span class="date">${date}</span><span id="networkStatus" class="offline-pill"><i></i><b>${navigator.onLine ? "可离线使用" : "当前离线"}</b></span></div>
         ${ui.tab === "learn" ? renderLearn() : ui.tab === "progress" ? renderProgress() : ui.tab === "resources" ? renderResources() : renderManage()}
@@ -197,34 +200,88 @@
     data.attempts.unshift({ id: uid(data.attempts), wordId: word.id, unit: word.unit, result, day: TODAY(), at: new Date().toISOString() });
     saveData(); ui.index += 1; ui.revealed = false; render();
   }
-  function speak(word) {
-    if (activeAudio) { activeAudio.pause(); activeAudio = null; }
-    if (navigator.onLine) {
-      let switched = false;
-      const fallback = () => {
-        if (switched) return;
-        switched = true;
-        activeAudio = null;
-        speakWithDevice(word);
-      };
-      const audio = new Audio(`https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`);
-      activeAudio = audio;
-      audio.preload = "auto";
-      audio.addEventListener("error", fallback, { once: true });
-      audio.addEventListener("ended", () => { if (activeAudio === audio) activeAudio = null; }, { once: true });
-      audio.play().catch(fallback);
-      return;
+  function stopSpeaking() {
+    clearTimeout(audioFallbackTimer);
+    if (activeAudio) {
+      activeAudio.pause();
+      activeAudio.removeAttribute("src");
+      activeAudio.load();
+      activeAudio = null;
     }
-    speakWithDevice(word);
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   }
-  function speakWithDevice(word) {
-    if (!("speechSynthesis" in window)) return toast("联网后即可播放单词发音");
-    speechSynthesis.cancel();
+  function speak(word) {
+    const requestId = ++speechRequestId;
+    stopSpeaking();
+    if (!navigator.onLine) return speakWithDevice(word, requestId);
+
+    const sources = [
+      `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`,
+      `https://fanyi.baidu.com/gettts?lan=en&text=${encodeURIComponent(word)}&spd=3&source=web`
+    ];
+    const audio = document.getElementById("wordAudio") || document.createElement("audio");
+    audio.setAttribute("playsinline", "");
+    audio.setAttribute("webkit-playsinline", "");
+    audio.preload = "auto";
+    activeAudio = audio;
+
+    const trySource = (index) => {
+      if (requestId !== speechRequestId) return;
+      if (index >= sources.length) {
+        activeAudio = null;
+        speakWithDevice(word, requestId);
+        return;
+      }
+      let movedOn = false;
+      const next = () => {
+        if (movedOn || requestId !== speechRequestId) return;
+        movedOn = true;
+        clearTimeout(audioFallbackTimer);
+        audio.pause();
+        trySource(index + 1);
+      };
+      audio.onplaying = () => {
+        clearTimeout(audioFallbackTimer);
+        toast(`正在播放：${word}`);
+      };
+      audio.onended = () => {
+        clearTimeout(audioFallbackTimer);
+        if (activeAudio === audio) activeAudio = null;
+      };
+      audio.onerror = next;
+      audio.onstalled = null;
+      audio.src = sources[index];
+      audio.load();
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === "function") playResult.catch(next);
+      audioFallbackTimer = setTimeout(() => {
+        if (audio.paused || !audio.currentTime) next();
+      }, 5000);
+    };
+    trySource(0);
+  }
+  function speakWithDevice(word, requestId) {
+    if (requestId !== speechRequestId) return;
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      return toast("这台平板缺少语音组件，请联网后再试");
+    }
+    const synth = window.speechSynthesis;
     const utterance = new SpeechSynthesisUtterance(word);
-    utterance.lang = "en-US";
+    const voices = typeof synth.getVoices === "function" ? synth.getVoices() : [];
+    const englishVoice = voices.find((voice) => /^en[-_]/i.test(voice.lang || ""));
+    if (englishVoice) utterance.voice = englishVoice;
+    utterance.lang = englishVoice?.lang || "en-US";
     utterance.rate = .82;
-    utterance.onerror = () => toast("联网后即可播放单词发音");
-    speechSynthesis.speak(utterance);
+    utterance.onstart = () => toast(`正在播放：${word}`);
+    utterance.onerror = () => toast("发音失败，请检查平板的英语语音包");
+    synth.cancel();
+    if (typeof synth.resume === "function") synth.resume();
+    synth.speak(utterance);
+    setTimeout(() => {
+      if (requestId === speechRequestId && !synth.speaking && !synth.pending) {
+        toast("发音失败，请检查平板的英语语音包");
+      }
+    }, 1800);
   }
   function exportBackup() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a");
